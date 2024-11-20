@@ -1,60 +1,96 @@
+import requests
+from ultralytics import YOLO
+import cv2
+import time
+import random
 import ollama
 from gtts import gTTS
 import os
 import re
 
+model = YOLO('yolov8n.pt')
 
-def clean_hebrew_text(text):
-    # Keep only Hebrew characters and spaces
-    cleaned_text = re.sub(r'[^\u0590-\u05FF\s]', '', text)  # Unicode range for Hebrew
-    return cleaned_text.strip()
+def get_simulated_sensor_data():
+    soil_moisture = random.randint(15, 80)
+    light_level = random.randint(100, 500)
+    return soil_moisture, light_level
+
+def detect_person_yolo():
+    cap = cv2.VideoCapture(0)
+    person_detected = False
+
+    print("Checking for person using YOLOv8...")
+    for _ in range(30):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        results = model(frame)
+
+        for result in results:
+            boxes = result.boxes
+            for box in boxes:
+                if int(box.cls) == 0:
+                    xyxy = box.xyxy.tolist()
+                    x1, y1, x2, y2 = xyxy[0]
+                    frame = cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                    cv2.putText(frame, "Person Detected", (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    person_detected = True
+
+        cv2.imshow("Detection", frame)
+        if person_detected:
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    return person_detected
 
 
-def chat_with_tinydolphin():
-    print("Welcome to TinyDolphin Chat in Hebrew! Type 'exit' or 'quit' to end the conversation.\n")
+def chat_with_tinydolphin(user_input):
+    try:
+        stream = ollama.chat(
+            model="tinydolphin",
+            messages=[{'role': 'user', 'content': f"Dolphin you are the plant: {user_input}"}],
+            stream=True
+        )
 
-    # Open a file to log all conversations
-    with open("tinydolphin_responses_hebrew.txt", "a", encoding="utf-8") as log_file:
-        while True:
-            user_input = input("You: ")
+        response = ""
+        for chunk in stream:
+            response += chunk['message']['content']
+        return response
 
-            # Exit the loop if the user types 'exit' or 'quit'
-            if user_input.lower() in ['exit', 'quit']:
-                print("להתראות!")  # "Goodbye!" in Hebrew
-                break
+    except Exception as e:
+        return f"An error occurred: {e}"
 
-            try:
-                stream = ollama.chat(
-                    model="tinydolphin",
-                    messages=[{'role': 'user', 'content': f"{user_input}"}],
-                    stream=True
-                )
+def smart_plant_conversation():
+    print("Starting Talking Smart Plant Simulation...")
+    while True:
+        # Simulate soil moisture and light level
+        soil_moisture, light_level = get_simulated_sensor_data()
+        print(f"Simulated Soil Moisture: {soil_moisture}%, Light Level: {light_level} lux")
 
-                # Collect the AI's response
-                response = ""
-                print("TinyDolphin:", end=" ", flush=True)
-                for chunk in stream:
-                    response += chunk['message']['content']
-                    print(chunk['message']['content'], end="", flush=True)
-                print("\n")  # Newline for clean formatting
+        person_detected = detect_person_yolo()
+        print("Checking for person...")
 
-                # Log the conversation to a file
-                log_file.write(f"You: {user_input}\n")
-                log_file.write(f"TinyDolphin: {response}\n\n")
+        if person_detected:
+            print("Person detected!")
+            if soil_moisture < 30:  # If plant is dry
+                response = chat_with_tinydolphin(
+                    "You are thirsty. Do you need water?")
+            else:
+                response = chat_with_tinydolphin("You are well hydrated Plant")
 
-                # Clean the response and check for Hebrew text
-                cleaned_response = clean_hebrew_text(response)
-                # if cleaned_response:
-                #     # Convert the cleaned response to speech in Hebrew
-                #     tts = gTTS(text=cleaned_response, lang='he')
-                #     tts.save("response_hebrew.mp3")
-                #     os.system("start response_hebrew.mp3")  # For Windows; use "open" on macOS
-                # else:
-                #     print("Response does not contain enough Hebrew text for speech synthesis.\n")
+            print(f"Plant says: {response}")
 
-            except Exception as e:
-                print(f"An error occurred: {e}")
+            tts = gTTS(text=response, lang='en')
+            tts.save("response_english.mp3")
+            os.system("start response_english.mp3")
+
+        else:
+            print("No person detected.")
+
+        time.sleep(5)
 
 
 if __name__ == "__main__":
-    chat_with_tinydolphin()
+    smart_plant_conversation()
